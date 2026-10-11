@@ -58,7 +58,26 @@ docker run --rm -v "$PWD:/workspace" -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_K
   ghcr.io/foolswithtools/infrapipe:latest validate system
 ```
 
-Variants with a cloud CLI bundled: `:aws` (AWS CLI v2), `:azure` (Azure CLI), `:pulumi` (Pulumi CLI). Pin a release with `:X.Y.Z` or `:X.Y.Z-aws`. Terraform is not bundled (OpenTofu is); gcloud is not included because infrapipe does not require it. Images and signatures for a release appear shortly after the release itself.
+| Tag | Contents | Compressed pull size (amd64 / arm64) |
+|---|---|---|
+| `:latest`, `:X.Y.Z` | infrapipe, OpenTofu, git | about 53 MB / 49 MB |
+| `:aws`, `:X.Y.Z-aws` | core + AWS CLI v2 | about 94 MB / 89 MB |
+| `:pulumi`, `:X.Y.Z-pulumi` | core + Pulumi CLI | about 174 MB / 158 MB |
+| `:azure`, `:X.Y.Z-azure` | infrapipe, OpenTofu, git + Azure CLI (Debian slim) | about 234 MB / 228 MB |
+
+Sizes are for release 0.0.136 and will drift. All images run as a non-root user (uid 10001) in `/workspace`, and are signed and carry an SBOM attestation.
+
+Terraform is not bundled (OpenTofu is). OpenTofu does not support the `oci` state backend, which needs Terraform 1.12 or later; if you use that backend, build your own image from this one with Terraform added. `gcloud` is not included because infrapipe does not require it, and `incus` is not included because it needs a daemon on the host.
+
+To run infrapipe in server mode in a container, publish port 8080 and pass the authentication and TLS options described in [Server Mode](docs/server-mode.md):
+
+```bash
+docker run --rm -p 8080:8080 -v "$PWD:/workspace" ghcr.io/foolswithtools/infrapipe:latest serve --addr :8080
+```
+
+The server answers `GET /api/v1/health` with `{"status":"ok"}` without authentication, which you can use for container health checks.
+
+What is inside each image, with licences and source pointers, is listed in [IMAGE_NOTICES.md](IMAGE_NOTICES.md). Images and signatures for a release appear shortly after the release itself.
 
 ### Verifying a download
 
@@ -83,6 +102,10 @@ cosign verify ghcr.io/foolswithtools/infrapipe:latest \
 ```
 
 Release tags are bare numbers (`0.0.133`, no leading `v`) and are never moved or re-cut once published.
+
+### Behind a corporate proxy or an artifact repository
+
+Release downloads from `github.com` redirect to `release-assets.githubusercontent.com`; allow-list that host (and `github.com`) or fetch through your artifact repository's remote/proxy repository pointed at this repo's releases. Asset names are stable and a published tag is never moved or re-cut, so version-pinned downloads are safe to cache. Container images (`ghcr.io/foolswithtools/infrapipe`) can be proxied the same way.
 
 > The source is not published, so there is no `go install` and no build-from-source path.
 
