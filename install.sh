@@ -97,11 +97,11 @@ fi
 
 OLD_VERSION=""
 if command -v "$INSTALL_DIR/infrapipe" >/dev/null 2>&1; then
-    OLD_VERSION="$("$INSTALL_DIR/infrapipe" version 2>/dev/null || true)"
+    OLD_VERSION="$("$INSTALL_DIR/infrapipe" version 2>&1 || true)"
 fi
 
 install -m 0755 "$ASSET" "$INSTALL_DIR/infrapipe"
-NEW_VERSION="$("$INSTALL_DIR/infrapipe" version 2>/dev/null || echo "infrapipe (version unavailable)")"
+NEW_VERSION="$("$INSTALL_DIR/infrapipe" version 2>&1 || echo "infrapipe (version unavailable)")"
 
 echo "Checksum verified. Installed to $INSTALL_DIR/infrapipe"
 [ -n "$OLD_VERSION" ] && echo "Replaced: $OLD_VERSION"
