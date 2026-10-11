@@ -147,6 +147,10 @@ creates (`aws cloudformation create-change-set --parameters file://…`):
   fails the plan or apply and shows the reason, with every injected value
   redacted (a value of 1–3 characters as a whole token only, see Bicep and
   ARM below).
+  The plan keeps a no-change change set and the apply deletes it once
+  read: the apply proves a plan ran by reading `<ws>-chgset`,
+  so `iac plan` then `iac apply` on an unchanged stack is a no-op, and a
+  kept change set no apply ever read goes with the next plan.
 - **`iac apply` needs a planned change set.** With no `<ws>-chgset`
   (never planned, or already executed: executing removes the stack's
   change sets), or one in any status other than `CREATE_COMPLETE` or a
