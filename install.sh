@@ -6,7 +6,7 @@
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/foolswithtools/infrapipe-releases/main/install.sh | bash
-#   ... | bash -s -- --version 0.0.133
+#   ... | bash -s -- --version v1.2.3
 #   ... | bash -s -- --install-dir "$HOME/.local/bin"
 #
 # Test overrides:

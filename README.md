@@ -47,22 +47,42 @@ infrapipe version
 Get-FileHash infrapipe-windows-amd64.exe -Algorithm SHA256   # compare with the .sha256 file
 ```
 
-**Docker** -- *coming with the first release.* The container image will be published as `ghcr.io/foolswithtools/infrapipe`:
+**Docker** -- a signed, multi-arch (amd64, arm64) image with infrapipe, OpenTofu and git, running as a non-root user:
 
 ```bash
 docker pull ghcr.io/foolswithtools/infrapipe:latest
 docker run --rm ghcr.io/foolswithtools/infrapipe:latest version
+
+# run against the current directory (mount your project and pass credentials as env vars)
+docker run --rm -v "$PWD:/workspace" -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY \
+  ghcr.io/foolswithtools/infrapipe:latest validate system
 ```
+
+Variants with a cloud CLI bundled: `:aws` (AWS CLI v2), `:azure` (Azure CLI), `:pulumi` (Pulumi CLI). Pin a release with `:X.Y.Z` or `:X.Y.Z-aws`. Terraform is not bundled (OpenTofu is); gcloud is not included because infrapipe does not require it. Images and signatures for a release appear shortly after the release itself.
 
 ### Verifying a download
 
 Every release asset has a SHA256 checksum file (`<asset>.sha256`); see the manual install steps above.
 
-Release signatures (cosign) are planned:
+Binaries, checksum files and SBOMs are signed with [cosign](https://docs.sigstore.dev/) (keyless, GitHub OIDC); each asset has a matching `<asset>.sigstore.json` bundle and the SBOM is `<binary>.spdx.json`:
 
 ```bash
-# TODO: cosign verify command
+cosign verify-blob \
+  --bundle infrapipe-linux-amd64.sigstore.json \
+  --certificate-identity "https://github.com/foolswithtools/infrapipe-releases/.github/workflows/sign-release.yml@refs/heads/main" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  infrapipe-linux-amd64
 ```
+
+Container images are signed the same way:
+
+```bash
+cosign verify ghcr.io/foolswithtools/infrapipe:latest \
+  --certificate-identity "https://github.com/foolswithtools/infrapipe-releases/.github/workflows/image.yml@refs/heads/main" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Release tags are bare numbers (`0.0.133`, no leading `v`) and are never moved or re-cut once published.
 
 > The source is not published, so there is no `go install` and no build-from-source path.
 
