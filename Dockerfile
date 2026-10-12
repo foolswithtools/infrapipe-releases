@@ -19,7 +19,7 @@ ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 # ---- fetch stages -------------------------------------------------------------
 FROM alpine:${ALPINE_VERSION} AS tofu
 ARG TARGETARCH
-ARG TOFU_VERSION=1.12.0
+ARG TOFU_VERSION=1.13.1
 ARG TOFU_SHA256_AMD64=8ccbc6f8ee21d2827715f3c6e08a9b3e0209b1e62057c05067ef117e047c1a80
 ARG TOFU_SHA256_ARM64=b9614df40575cc3fc10a8a25025b7245d961da279f715ea3efff4ddae8e6938a
 RUN apk add --no-cache curl unzip ca-certificates
@@ -76,7 +76,7 @@ USER 10001:10001
 # ---- azure (Debian slim: the Azure CLI is a Python application) ---------------
 FROM ${PYTHON_IMAGE} AS azure
 ARG TARGETARCH
-ARG AZURE_CLI_VERSION=2.80.0
+ARG AZURE_CLI_VERSION=2.91.0
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates git tini \
  && rm -rf /var/lib/apt/lists/* \
