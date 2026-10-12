@@ -10,6 +10,10 @@
 #   pulumi             core + Pulumi CLI
 #   azure              infrapipe + OpenTofu + git + Azure CLI (Debian slim; az is Python)
 #
+# infrapipe reads $HOME/.infrapipe.yaml by default. $HOME is /home/infrapipe, so the image links
+# that path to /workspace/.infrapipe.yaml: mount your project at /workspace and every command
+# (validate iac, iac plan, ...) finds its configuration without --config.
+#
 # Terraform (BUSL-1.1) is deliberately NOT bundled; OpenTofu (MPL-2.0) is.
 # Not included: gcloud (never required; HTTP fallback exists), incus (needs a host daemon).
 
@@ -48,7 +52,8 @@ RUN apk add --no-cache ca-certificates git tini \
  && git config --system --add safe.directory '*' \
  && addgroup -g 10001 infrapipe \
  && adduser -D -u 10001 -G infrapipe -h /home/infrapipe infrapipe \
- && mkdir -p /workspace && chown infrapipe:infrapipe /workspace
+ && mkdir -p /workspace && chown infrapipe:infrapipe /workspace \
+ && ln -s /workspace/.infrapipe.yaml /home/infrapipe/.infrapipe.yaml
 COPY --from=tofu /out/tofu /usr/local/bin/tofu
 COPY --chmod=0755 bin/infrapipe-linux-${TARGETARCH} /usr/local/bin/infrapipe
 LABEL org.opencontainers.image.title="infrapipe" \
@@ -86,7 +91,8 @@ RUN apt-get update \
  && ln -s /opt/az/bin/az /usr/local/bin/az \
  && groupadd -g 10001 infrapipe \
  && useradd -m -u 10001 -g infrapipe -d /home/infrapipe infrapipe \
- && mkdir -p /workspace && chown infrapipe:infrapipe /workspace
+ && mkdir -p /workspace && chown infrapipe:infrapipe /workspace \
+ && ln -s /workspace/.infrapipe.yaml /home/infrapipe/.infrapipe.yaml
 COPY --from=tofu /out/tofu /usr/local/bin/tofu
 COPY --chmod=0755 bin/infrapipe-linux-${TARGETARCH} /usr/local/bin/infrapipe
 LABEL org.opencontainers.image.title="infrapipe (azure)" \

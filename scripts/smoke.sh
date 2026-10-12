@@ -64,9 +64,12 @@ case "$variant" in
   azure)  step "az cli";     run --entrypoint az "$img" version ;;
   pulumi) step "pulumi cli"; run --entrypoint pulumi "$img" version ;;
 esac
-step "validate config";  proj validate config --config .infrapipe.yaml
+# No --config on purpose: the image must find the project's .infrapipe.yaml by default
+# (HOME/.infrapipe.yaml is linked to /workspace/.infrapipe.yaml).
+step "validate config (default config discovery)";  proj validate config
 step "validate iac (engine installed, version matches config $tv)"
-out="$(proj validate iac --config .infrapipe.yaml 2>&1)"; printf '%s\n' "$out" | grep -E "Version match|IaC\.tofu\.version" || true
-printf '%s\n' "$out" | grep -q "Version match" || { echo "validate iac did not report a version match" >&2; exit 1; }
-step "validate system";  proj validate system --config .infrapipe.yaml
+out="$(proj validate iac 2>&1)"; printf '%s\n' "$out" | grep -E "Version match|IaC\.tofu\.version" || true
+printf '%s\n' "$out" | grep -q "Version match" || { echo "validate iac did not report a version match (config not found?)" >&2; exit 1; }
+step "validate system (must actually see the config)"
+out="$(proj validate system 2>&1)"; printf '%s\n' "$out" | grep -E "git|tofu|terraform" | head -6 || true
 echo; echo "smoke OK: $img ($variant)"
