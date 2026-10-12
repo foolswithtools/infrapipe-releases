@@ -65,7 +65,7 @@ docker run --rm -v "$PWD:/workspace" -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_K
 | `:pulumi`, `:X.Y.Z-pulumi` | core + Pulumi CLI | about 174 MB / 158 MB |
 | `:azure`, `:X.Y.Z-azure` | infrapipe, OpenTofu, git + Azure CLI (Debian slim) | about 234 MB / 228 MB |
 
-Sizes are for release 0.0.136 and will drift. All images run as a non-root user (uid 10001) in `/workspace`, and are signed and carry an SBOM attestation.
+Sizes are for release 0.0.136 and will drift. All images run as a non-root user (uid 10001) in `/workspace`, and are signed and carry an SBOM attestation. Mount your project at `/workspace`: the image links `$HOME/.infrapipe.yaml` to `/workspace/.infrapipe.yaml`, so every command finds your configuration without `--config` (which still overrides it).
 
 Terraform is not bundled (OpenTofu is). OpenTofu does not support the `oci` state backend, which needs Terraform 1.12 or later; if you use that backend, build your own image from this one with Terraform added. `gcloud` is not included because infrapipe does not require it, and `incus` is not included because it needs a daemon on the host.
 
@@ -195,7 +195,7 @@ infrapipe validate system     # Check system tool requirements
 infrapipe validate config     # Check config file is valid
 infrapipe validate secrets    # Check credentials are set
 infrapipe validate backend    # Check state backend is accessible
-infrapipe iac init            # Generate provider/backend config
+infrapipe iac init            # Generate provider/backend config (Pulumi: pulumi login)
 infrapipe iac plan            # Preview infrastructure changes
 infrapipe iac apply           # Apply infrastructure changes
 ```
