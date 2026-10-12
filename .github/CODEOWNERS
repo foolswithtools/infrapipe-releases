@@ -1,0 +1,8 @@
+# Changes to this repository need a review from a code owner other than the author.
+# The release workflows (signing, images), the Dockerfile and the installer define what
+# "official" means for users, so they are listed explicitly even though * covers them.
+*                    @clostaunau @lugnut42
+/.github/            @clostaunau @lugnut42
+/Dockerfile          @clostaunau @lugnut42
+/install.sh          @clostaunau @lugnut42
+/scripts/            @clostaunau @lugnut42
