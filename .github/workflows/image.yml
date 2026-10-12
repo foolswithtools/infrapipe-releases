@@ -61,19 +61,8 @@ jobs:
           tags: smoke:${{ matrix.variant }}
           provenance: false
           sbom: false
-      - name: Smoke test
-        run: |
-          set -eu
-          img=smoke:${{ matrix.variant }}
-          docker run --rm "$img" version
-          docker run --rm --entrypoint tofu "$img" version
-          docker run --rm --entrypoint git "$img" --version
-          case "${{ matrix.variant }}" in
-            aws)    docker run --rm --entrypoint aws "$img" --version ;;
-            azure)  docker run --rm --entrypoint az "$img" version ;;
-            pulumi) docker run --rm --entrypoint pulumi "$img" version ;;
-          esac
-          [ "$(docker run --rm --entrypoint id "$img" -u)" = "10001" ] || { echo "not running as 10001"; exit 1; }
+      - name: Smoke test (tools run, non-root, infrapipe validates a project inside the image)
+        run: bash scripts/smoke.sh "smoke:${{ matrix.variant }}" "${{ matrix.variant }}"
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
