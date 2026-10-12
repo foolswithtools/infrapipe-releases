@@ -1,0 +1,46 @@
+# Weekly check of the tool versions pinned in the Dockerfile (OpenTofu, Pulumi, Azure CLI).
+# When a newer stable release exists it opens ONE pull request that bumps the version and its
+# per-arch SHA-256 values. Merging only changes the Dockerfile; images are rebuilt and
+# re-signed when the next release is promoted. Base images are not bumped here (see
+# scripts/bump-versions.sh).
+name: check-versions
+on:
+  schedule:
+    - cron: "17 14 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only report; do not open a pull request"
+        type: boolean
+        default: false
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Compare pins with upstream releases
+        run: |
+          set -euo pipefail
+          bash scripts/bump-versions.sh --out "$RUNNER_TEMP/changes.md"
+          cat "$RUNNER_TEMP/changes.md" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Open a pull request when something changed
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- Dockerfile; then echo "nothing to bump"; exit 0; fi
+          open="$(gh pr list --state open --search 'head:bump/tool-versions' --json number --jq 'length')"
+          if [ "$open" != "0" ]; then echo "a version-bump PR is already open; not opening another"; exit 0; fi
+          branch="bump/tool-versions-$(date -u +%Y%m%d%H%M)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q -b "$branch"
+          git add Dockerfile
+          git commit -q -m "Dockerfile: bump pinned tool versions"
+          git push -q origin "$branch"
+          gh pr create --base "${{ github.event.repository.default_branch }}" --head "$branch" \
+            --title "Dockerfile: bump pinned tool versions" --body-file "$RUNNER_TEMP/changes.md"
