@@ -3,11 +3,16 @@
 # scripts/smoke.sh from a branch, or before merging a tool-version bump.
 name: build-test
 on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - scripts/smoke.sh
+      - .github/workflows/build-test.yml
   workflow_dispatch:
     inputs:
       tag:
-        description: Release whose linux binaries to use (bare, e.g. 0.0.140)
-        required: true
+        description: Release whose linux binaries to use (bare, e.g. 0.0.140); default is the latest
+        required: false
 permissions:
   contents: read
 jobs:
@@ -25,9 +30,15 @@ jobs:
       TAG: ${{ inputs.tag }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Validate input
+      - name: Resolve the release whose binaries are used
         run: |
-          case "$TAG" in (*[!0-9.]*|"") echo "tag must be digits and dots"; exit 1;; esac
+          set -euo pipefail
+          if [ -z "${TAG:-}" ]; then
+            TAG="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 --json tagName --jq '.[0].tagName')"
+          fi
+          case "$TAG" in (*[!0-9.]*|"") echo "tag must be digits and dots, got '$TAG'"; exit 1;; esac
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "using binaries from release $TAG"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Fetch and verify the linux binaries
         run: |
