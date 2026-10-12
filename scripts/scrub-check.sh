@@ -62,10 +62,22 @@ run() { # run RULE : stdin lines -> report; remember if anything printed
 g '(^|[^0-9])[0-9]{12}([^0-9]|$)' |
 	grep -vE ":[0-9]+:[^0-9]?${ALLOW_ACCOUNT_ID}[^0-9]?\$" | run 'aws-account-id'
 
-# 2-4. organisation / personal handles (case-insensitive)
-for w in shiftsecurityleft extremevalue managelab; do
-	find "$DIR" -type f -exec grep -HniIoE "$w" {} + | run "forbidden-handle:$w"
-done
+# 2. extra forbidden words (organisation / personal handles; case-insensitive, fixed
+#    strings), one per line in the file named by SCRUB_BLOCKLIST. The list is kept on the
+#    private side so this public copy does not itself publish the words; the promote
+#    workflow always supplies it. When SCRUB_BLOCKLIST is set but missing or empty the
+#    check refuses to run, so coverage cannot silently drop. The matched word is never
+#    printed.
+if [ -n "${SCRUB_BLOCKLIST:-}" ]; then
+	if [ ! -s "$SCRUB_BLOCKLIST" ]; then
+		echo "scrub-check: SCRUB_BLOCKLIST is set but missing or empty" >&2
+		exit 2
+	fi
+	while IFS= read -r w; do
+		case "$w" in '' | '#'*) continue ;; esac
+		find "$DIR" -type f -exec grep -HniIoF -e "$w" {} + | run "forbidden-word"
+	done <"$SCRUB_BLOCKLIST"
+fi
 
 # 5. links into the private source repo (infrapipe-releases is allowed)
 g '[A-Za-z0-9./_-]*foolswithtools/infrapipe([^-A-Za-z0-9_]|$)' |
