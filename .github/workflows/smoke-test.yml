@@ -1,0 +1,39 @@
+# Runs the container smoke test against images that are ALREADY published (no rebuild, no push).
+# Use it to re-check a release's images, or to try a change to scripts/smoke.sh without
+# touching any promoted tag.
+name: smoke-test
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published image version to test (bare, e.g. 0.0.140)
+        required: true
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { variant: core,   suffix: "" }
+          - { variant: aws,    suffix: "-aws" }
+          - { variant: pulumi, suffix: "-pulumi" }
+          - { variant: azure,  suffix: "-azure" }
+    steps:
+      - name: Validate input
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          case "$TAG" in (*[!0-9.]*|"") echo "tag must be digits and dots"; exit 1;; esac
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Pull the published image anonymously and smoke test it
+        env:
+          TAG: ${{ inputs.tag }}
+          IMG: ghcr.io/foolswithtools/infrapipe
+        run: |
+          set -euo pipefail
+          ref="$IMG:${TAG}${{ matrix.suffix }}"
+          docker pull "$ref"
+          bash scripts/smoke.sh "$ref" "${{ matrix.variant }}"
