@@ -2,7 +2,9 @@
 
 Infrapipe is configured through a `.infrapipe.yaml` file in your project root. This document describes every section, field, and valid value.
 
-**Quick start:** Run `infrapipe init config` to interactively generate a valid `.infrapipe.yaml` with guided prompts for your IaC engine, cloud provider, state backend, and SDLC environments.
+**Where infrapipe finds it:** Every command finds it the same way: `--config <path>` when given (a missing or unreadable file fails every command, `serve` included, never a fallback; `validate config` reports an unreadable one in its own check table), else `.infrapipe.yaml` in the git checkout root (the current directory outside a checkout), else `$HOME/.infrapipe.yaml`. One file is used, never a merge; a command that needs a config and finds none fails naming every path searched, and one whose file cannot be read (malformed YAML, unreadable, a `--config` without a `.yaml` extension) fails naming the file.
+
+**Quick start:** Run `infrapipe init config` to interactively generate a valid `.infrapipe.yaml` with guided prompts for your IaC engine, cloud provider, state backend, and SDLC environments. Without `--output` it saves the file at the git checkout root (the current directory outside a checkout), the first place every command looks.
 
 ## Top-Level Structure
 
@@ -112,6 +114,8 @@ Used when `IaC.type` is `tofu`. Same fields as `IaC.terraform` (including the S3
 
 Used when `IaC.type` is `cloudformation`.
 
+`iac init` writes nothing for CloudFormation, locally and over `--remote`: the template is yours, and credentials reach the aws CLI through the subprocess environment according to `cloudProvider.aws.credential_source`. `IaC.terraform.backend` is not read.
+
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `region` | string | No | -- | AWS region for CloudFormation |
@@ -119,6 +123,8 @@ Used when `IaC.type` is `cloudformation`.
 ### IaC.bicep
 
 Used when `IaC.type` is `bicep`. Requires the Azure CLI (`az`) to be installed.
+
+`iac init` writes nothing for Bicep, locally and over `--remote`: no provider or backend file, since az reads your template and logs in per operation as described below. `IaC.terraform.backend` is not read.
 
 **Ambient login (`cloudProvider.azurerm.credential_source: ambient`).** The az CLI ignores credential environment variables (Azure/azure-cli#10241), so before every operation that reaches Azure (plan, apply, destroy, output capture) infrapipe logs az in as the workload's identity, then runs every az call of that operation (`what-if`, `create`, `group delete`, ...) against that login:
 
@@ -146,7 +152,7 @@ All four variables are required; a missing one fails the operation before az run
 
 ### IaC.arm
 
-Used when `IaC.type` is `arm`. Requires the Azure CLI (`az`) to be installed. Authentication is the same as [IaC.bicep](#iacbicep), including the ambient `az login`, and so is destroy: the resource group named after the workspace is deleted and the delete is waited for.
+Used when `IaC.type` is `arm`. Requires the Azure CLI (`az`) to be installed. Authentication is the same as [IaC.bicep](#iacbicep), including the ambient `az login`, and so is destroy: the resource group named after the workspace is deleted and the delete is waited for. `iac init` writes nothing for ARM either, locally and over `--remote`.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
@@ -294,7 +300,7 @@ cloudProvider:
 
 **Credentials for Terraform/OpenTofu.** Credentials are never written into the generated `.tf` files; they reach Terraform/OpenTofu through the subprocess environment.
 
-- `credential_source: env` — `iac init` requires `{INFRAENV}_AWS_ACCESS_KEY` and `{INFRAENV}_AWS_SECRET_KEY`. Every Terraform/OpenTofu subprocess receives them as `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, plus `AWS_SESSION_TOKEN` from the optional `{INFRAENV}_AWS_SESSION_TOKEN` (for temporary credentials).
+- `credential_source: env` — both `{INFRAENV}_AWS_ACCESS_KEY` and `{INFRAENV}_AWS_SECRET_KEY` are required before any tool runs, for every engine: `iac init`, `plan`, `apply` and `destroy` (and the Pulumi `iac init`, before `pulumi login`) fail with `missing required environment variable: {INFRAENV}_AWS_SECRET_KEY (credential_source: env for aws)` (every missing name listed, never a value), over `--remote` as HTTP 400 (the streaming apply/destroy as an `error` event), and terraform, tofu, pulumi or aws never starts; `validate backend` and `validate secrets` apply the same rule. A half pair used to start the tool with `AWS_ACCESS_KEY_ID` alone, which the AWS SDK treats as "not configured" and falls through to the host's profile or instance role, an identity you did not select. Every Terraform/OpenTofu subprocess receives the pair as `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, plus `AWS_SESSION_TOKEN` from the optional `{INFRAENV}_AWS_SESSION_TOKEN` (for temporary credentials).
 - `credential_source: ambient` (the default) — no static keys are required (the S3 backend still requires `{INFRAENV}_AWS_TFSTATE_S3_BUCKET`, an identifier; `{INFRAENV}_AWS_ASSUME_ROLE_ARN` is optional) and none are exported; the AWS SDK default chain supplies the workload identity. If infrapipe's own environment carries `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY`, plan/apply/destroy refuse to run, because the SDK chain would use that static key instead of the workload identity. `AWS_PROFILE`, `AWS_WEB_IDENTITY_TOKEN_FILE`/`AWS_ROLE_ARN` and the container-credential variables are allowed.
 - In both modes the provider's `assume_role` block is emitted only when `{INFRAENV}_AWS_ASSUME_ROLE_ARN` is set and `auth_mode` is not `environment`.
 
@@ -342,6 +348,8 @@ provider "kubernetes" {
 
 Used when `cloudProvider.type` is `azurerm`, `azuread`, `azapi` or `azureCombo`: the whole Azure family reads this block.
 
+**Generated provider file.** `iac init` with Terraform or OpenTofu writes `provider-<cloudProvider.type>.tf` (`provider-azurerm.tf`, `provider-azuread.tf`, `provider-azapi.tf`, `provider-azureCombo.tf`), the same name locally and over `--remote`. In earlier releases the local CLI wrote `provider-azrm.tf`, `provider-azad.tf` and `provider-azCombo.tf` while the server wrote the regular names, so a checkout initialised both ways carried two files declaring the same provider and `terraform init` failed on the duplicate. **Migration:** after upgrading, a checkout initialised by the old CLI still holds the old file; re-running `iac init` writes the new name beside it, leaves the old file in place (infrapipe never deletes a user's file) and warns naming it (locally in the log, over `--remote` in the `Remote init:` message). Delete the old file by hand: `rm provider-azrm.tf` (or `provider-azad.tf`, `provider-azCombo.tf`). The file content is identical, so nothing else changes.
+
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `region` | string | No | -- | Azure region |
@@ -363,7 +371,7 @@ Used when `cloudProvider.type` is `azurerm`, `azuread`, `azapi` or `azureCombo`:
 
 `validate secrets` (and `POST /api/v1/validate`) checks exactly this table for the configured mode and backend; in ambient mode it also resolves the identity and reports `ambient method: <msi|workload_identity|azure_cli>` and `identity client id: <id|system-assigned>`. `init config` lists the same variables, marking the optional ones.
 
-**Credentials for Terraform, OpenTofu and Pulumi.** With `credential_source: env`, all four of `{INFRAENV}_AZ_CLIENT_ID`, `_CLIENT_SECRET`, `_TENANT_ID` and `_SUBSCRIPTION_ID` are required and every subprocess receives them as `ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_TENANT_ID` and `ARM_SUBSCRIPTION_ID`. Ambient mode is described under **ambient_method** below.
+**Credentials for Terraform, OpenTofu and Pulumi.** With `credential_source: env`, all four of `{INFRAENV}_AZ_CLIENT_ID`, `_CLIENT_SECRET`, `_TENANT_ID` and `_SUBSCRIPTION_ID` are required and every subprocess receives them as `ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_TENANT_ID` and `ARM_SUBSCRIPTION_ID`. A missing one fails `iac init`, `plan`, `apply` and `destroy` with `missing required environment variable: {INFRAENV}_AZ_CLIENT_SECRET (credential_source: env)` before any tool runs (the Terraform/OpenTofu `iac init` in the provider generator, which in earlier releases required only the first three, in other words, and answered 500 over `--remote`), over `--remote` as HTTP 400 (the streaming apply/destroy as an `error` event, the status OCI's env mode has had since #302); Bicep and ARM apply the same rule before their az login. Ambient mode is described under **ambient_method** below.
 
 **exec_role fields:** `client_id` and `tenant_id` (identifiers, set as literal values: infrapipe does not expand `${…}` placeholders in `.infrapipe.yaml`, and a `${` in any `exec_role` field is an error). The exec role's client secret comes from the environment variable `{INFRAENV}_AZ_EXEC_CLIENT_SECRET`, never the config file: `exec_role.client_secret` is rejected with an error that names the variable. With `credential_source: ambient` a set `{INFRAENV}_AZ_EXEC_CLIENT_SECRET` is rejected too when an exec_role is configured (ambient mode carries no long-lived secret), and ignored with a warning when none is; a `client_id`-only exec_role is allowed. `auth_mode: environment` skips the exec role, as for AWS.
 
@@ -440,7 +448,7 @@ Used when `cloudProvider.type` is `gcp`.
 | `{INFRAENV}_GCP_CREDENTIALS` | required | not required; with no `credential_source` set it trips the migration guard |
 | `{INFRAENV}_GCP_IMPERSONATE_SERVICE_ACCOUNT` | optional | optional |
 
-`validate secrets` (and `POST /api/v1/validate`) checks exactly this table for the configured mode; `init config` lists the same variables, marking the optional one. **Behaviour change:** in `env` mode `validate secrets` now fails without `{INFRAENV}_GCP_CREDENTIALS`; it used to pass. In `ambient` mode `validate secrets` also fails, with the inherited-static-credential message, when the process carries an inherited static Google credential (see below), so it cannot pass a setup that `iac plan` refuses.
+`validate secrets` (and `POST /api/v1/validate`) checks exactly this table for the configured mode; `init config` lists the same variables, marking the optional one. The Terraform/OpenTofu `iac init` renders the project and region into `provider-gcp.tf` and refuses without them, in either mode: `missing required environment variable: DEV_GCP_PROJECT (required by the gcp provider in every credential_source)` (`config.CheckGCPProviderEnv`, HTTP 400 over `--remote`). **Behaviour change:** in `env` mode `validate secrets` now fails without `{INFRAENV}_GCP_CREDENTIALS`; it used to pass. In `ambient` mode `validate secrets` also fails, with the inherited-static-credential message, when the process carries an inherited static Google credential (see below), so it cannot pass a setup that `iac plan` refuses.
 
 **Default and migration.** `ambient` is the default: with no `credential_source`, infrapipe exports no key file and the tools find credentials through ADC. Before this release the same config ran in `env` mode. With `{INFRAENV}_GCP_CREDENTIALS` set and no `credential_source`, the [migration guard](#credential-source) now stops every IaC operation before any tool runs, locally, via `--remote` and as HTTP 400 from the server. Set `credential_source: env` to keep using the key file:
 
@@ -473,7 +481,7 @@ provider "google" {
 | `env` | `{INFRAENV}_GCP_CREDENTIALS` (required) → `GOOGLE_APPLICATION_CREDENTIALS` | `{INFRAENV}_GCP_CREDENTIALS` (required) → `GOOGLE_APPLICATION_CREDENTIALS`; `{INFRAENV}_GCP_PROJECT` → `GOOGLE_PROJECT`, `{INFRAENV}_GCP_REGION` → `GOOGLE_REGION`, `{INFRAENV}_GCP_IMPERSONATE_SERVICE_ACCOUNT` → `GOOGLE_IMPERSONATE_SERVICE_ACCOUNT` when set |
 | `ambient` | nothing exported: ADC (metadata server or workload identity federation) | no credential: `GOOGLE_PROJECT` / `GOOGLE_REGION`, plus `GOOGLE_IMPERSONATE_SERVICE_ACCOUNT` when `{INFRAENV}_GCP_IMPERSONATE_SERVICE_ACCOUNT` is set |
 
-**`env` mode** requires `{INFRAENV}_GCP_CREDENTIALS` for every engine and fails `plan`/`apply`/`destroy` without it.
+**`env` mode** requires `{INFRAENV}_GCP_CREDENTIALS` for every engine and fails `iac init`, `plan`, `apply` and `destroy` without it, before any tool runs (the Terraform/OpenTofu `iac init` in the provider generator, which in earlier releases wrote `provider-gcp.tf` and exited 0), with `missing required environment variable: {INFRAENV}_GCP_CREDENTIALS (credential_source: env)`; over `--remote` that is HTTP 400 (the streaming apply/destroy an `error` event).
 
 Credentials are never written into `provider-gcp.tf` or `backend-gcs.tf`. In `ambient` mode a set `{INFRAENV}_GCP_CREDENTIALS` is warned about and not exported, and infrapipe refuses to run when the process already carries a static Google credential that ADC would prefer: any of `GOOGLE_CREDENTIALS`, `GOOGLE_CLOUD_KEYFILE_JSON`, `GCLOUD_KEYFILE_JSON`, `GOOGLE_OAUTH_ACCESS_TOKEN`, `GOOGLE_BACKEND_CREDENTIALS`, or a `GOOGLE_APPLICATION_CREDENTIALS` file that the exec_role check above would refuse. A `GOOGLE_APPLICATION_CREDENTIALS` pointing at a federation config (e.g. from `google-github-actions/auth`) passes through unchanged.
 
@@ -623,6 +631,8 @@ The generated block is always `provider "kubernetes" {}`: no `config_path`, `con
 
 Earlier releases exported `KUBE_CONTEXT`, which no provider reads; it is never exported now.
 
+**`{INFRAENV}_KUBECONFIG` is required before any tool runs.** In `env` mode the executors require it themselves, not only `validate secrets`: `iac init`, `plan`, `apply` and `destroy`, for every engine, fail in infrapipe, before terraform, tofu or pulumi starts, with `missing required environment variable: DEV_KUBECONFIG (credential_source: env for kubernetes)` (HTTP 400 over `--remote`, the streaming apply/destroy ending with the `error` event; `config.CheckKubernetesEnv`, the one definition `validate secrets` lists from). A host and token without a kubeconfig are not an env-mode identity. Earlier releases started the tool with whatever was set, and with nothing set the `hashicorp/kubernetes` provider fell back to the in-cluster service account and Pulumi to `~/.kube/config`, an identity the operator did not select. The Terraform/OpenTofu `iac init` runs the same rule before writing the provider block (`failed to create provider configuration: ` and the message above, HTTP 400 over `--remote`).
+
 **Inherited environment wins over the service account.** infrapipe's subprocesses inherit its own environment. In `ambient` mode, any of these in infrapipe's environment is used *instead of* the pod's service account:
 
 - Terraform / OpenTofu: `KUBE_CONFIG_PATH`, `KUBE_CONFIG_PATHS`, `KUBE_CTX`, `KUBE_CTX_AUTH_INFO`, `KUBE_CTX_CLUSTER`, `KUBE_HOST`, `KUBE_TOKEN`, `KUBE_USER`, `KUBE_PASSWORD`, `KUBE_CLIENT_CERT_DATA`, `KUBE_CLIENT_KEY_DATA`, `KUBE_CLUSTER_CA_CERT_DATA`;
@@ -764,7 +774,8 @@ provider "oci" {
 The `oci` state backend's `{INFRAENV}_OCI_TFSTATE_BUCKET` and `_NAMESPACE` are required whenever `backend: oci`, for any cloud; see [State backend variables](#state-backend-variables).
 
 - **Deprecated aliases:** `{INFRAENV}_OCI_TENANCY_OCID` and `{INFRAENV}_OCI_USER_OCID` (which `init config` used to advise) are still read as fallbacks, with a warning naming the canonical variable; `validate secrets` reports `warn`. They will be removed in a later release.
-- **Terraform/OpenTofu** (`env`): the generated provider block is only `provider "oci" { auth = "ApiKey" }`; no OCID, fingerprint, key or path is written into it. The executor maps `_TENANCY_OCID` → `OCI_TENANCY_OCID`, `_USER_OCID` → `OCI_USER_OCID`, `_OCI_FINGERPRINT` → `OCI_FINGERPRINT`, `_OCI_PRIVATE_KEY` → `OCI_PRIVATE_KEY`, `_OCI_PRIVATE_KEY_PATH` → `OCI_PRIVATE_KEY_PATH` and `_OCI_REGION` → `OCI_REGION` into the subprocess environment; the oracle/oci provider reads its arguments from them. Not `TF_VAR_*`: Terraform would also hand those to any same-named `variable` your code declares and store the value in `out.tfplan`. Because the provider reads `TF_VAR_<attr>` first, then `OCI_<ATTR>`, env mode refuses any inherited identity variable the mapping does not shadow: `TF_VAR_tenancy_ocid`, `TF_VAR_user_ocid`, `TF_VAR_fingerprint`, `TF_VAR_private_key`, `TF_VAR_private_key_path`, and the same attributes under their `OCI_<ATTR>` names (e.g. a host `OCI_FINGERPRINT` with no `{INFRAENV}_OCI_FINGERPRINT`, or a host `OCI_PRIVATE_KEY_PATH` beside mapped key content), since either would silently override the mapped identity. An inherited name the mapping itself sets passes. An inherited `TF_VAR_region` that differs from `{INFRAENV}_OCI_REGION` is warned about.
+- **Required set** (`env`): the executors require the table's `env` column before any tool starts, through the one rule `validate secrets` lists from (`config.CheckOCIAPIKeyEnv`, the suffixes in `config.OCIAPIKeyVarSuffixes`): `iac init`, `plan`, `apply` and `destroy` fail with `missing required environment variable: {INFRAENV}_OCI_FINGERPRINT (credential_source: env for oci)` (every missing name listed in table order, the key pair as `_OCI_PRIVATE_KEY or _OCI_PRIVATE_KEY_PATH`), over `--remote` as HTTP 400 (the streaming apply/destroy as an `error` event), and terraform, tofu or pulumi never runs; you no longer read the provider's `did not find a proper configuration for keyFingerprint` after a provider download. The deprecated aliases satisfy the tenancy and user. Ambient mode requires none of them.
+- **Terraform/OpenTofu** (`env`): the generated provider block is only `provider "oci" { auth = "ApiKey" }`; no OCID, fingerprint, key or path is written into it. The executor maps `_TENANCY_OCID` → `OCI_TENANCY_OCID`, `_USER_OCID` → `OCI_USER_OCID`, `_OCI_FINGERPRINT` → `OCI_FINGERPRINT`, `_OCI_PRIVATE_KEY` → `OCI_PRIVATE_KEY`, `_OCI_PRIVATE_KEY_PATH` → `OCI_PRIVATE_KEY_PATH` and `_OCI_REGION` → `OCI_REGION` into the subprocess environment; the oracle/oci provider reads its arguments from them. Not `TF_VAR_*`: Terraform would also hand those to any same-named `variable` your code declares and store the value in `out.tfplan`. Because the provider reads `TF_VAR_<attr>` first, then `OCI_<ATTR>`, env mode refuses any inherited identity variable the mapping does not shadow: `TF_VAR_tenancy_ocid`, `TF_VAR_user_ocid`, `TF_VAR_fingerprint`, `TF_VAR_private_key`, `TF_VAR_private_key_path`, and the same attributes under their `OCI_<ATTR>` names (e.g. a host `OCI_FINGERPRINT` with no `{INFRAENV}_OCI_FINGERPRINT`, or a host `OCI_PRIVATE_KEY_PATH` beside mapped key content), since either would silently override the mapped identity. An inherited name the mapping itself sets passes; since the required set comes first, a host `OCI_FINGERPRINT` with no `{INFRAENV}_OCI_FINGERPRINT` is reported as the missing variable. An inherited `TF_VAR_region` that differs from `{INFRAENV}_OCI_REGION` is warned about.
 - **Key path:** `{INFRAENV}_OCI_PRIVATE_KEY_PATH` is mapped to the key-path variable (`OCI_PRIVATE_KEY_PATH`, Pulumi `TF_VAR_private_key_path`) instead of the key-content one. A value of `{INFRAENV}_OCI_PRIVATE_KEY` that has no `-----BEGIN` and names a regular file is treated as a path too, with a warning to use `{INFRAENV}_OCI_PRIVATE_KEY_PATH` (Pulumi users used to put a path there).
 - **Pulumi** (`env`): `_TENANCY_OCID` → `TF_VAR_tenancy_ocid`, `_USER_OCID` → `TF_VAR_user_ocid`, `_OCI_FINGERPRINT` → `TF_VAR_fingerprint`, `_OCI_PRIVATE_KEY` → `TF_VAR_private_key`, `_OCI_PRIVATE_KEY_PATH` → `TF_VAR_private_key_path`, `_OCI_REGION` → `TF_VAR_region`, with the same refusal of unshadowed inherited `TF_VAR_<attr>`/`OCI_<ATTR>` identity variables as Terraform/OpenTofu (pulumi-oci is bridged from oracle/oci and reads them in the same order). **Pulumi** (`ambient`): only `TF_VAR_auth=<auth>` (selected as above) and `TF_VAR_region` when a region is known; no tenancy, user, fingerprint or key, even when they are set. Pulumi does not document `TF_VAR_auth` (upstream reads it the same way as the documented names); the real pulumi-oci takes the instance-principal branch from it.
 - **`validate secrets`** (`ambient`): passes with `principal=<auth> (<reason>)` and `region=<source>`. It warns when `InstancePrincipal`/`OKEWorkloadIdentity` has no region, or when an unprefixed `OCI_PRIVATE_KEY`, `TF_VAR_private_key` or `OCI_CLI_KEY_CONTENT` is inherited (the explicit `auth` makes the provider ignore it).
@@ -809,7 +820,7 @@ Used when `cloudProvider.type` is `digitalocean`.
 |-------|------|----------|---------|-------------|
 | `credential_source` | string | No | `env` | Only `env` is accepted; `ambient` is rejected (no workload identity). See [Credential source](#credential-source) |
 
-**Environment variables.** `{INFRAENV}_DO_TOKEN` (required by `validate secrets`) is mapped to `DIGITALOCEAN_TOKEN` for Terraform/OpenTofu and Pulumi. The generated `provider "digitalocean" {}` carries no token.
+**Environment variables.** `{INFRAENV}_DO_TOKEN` is required before any tool runs: `iac init`, `plan`, `apply` and `destroy` fail in infrapipe, for every engine,, before terraform, tofu or pulumi starts, with `missing required environment variable: DEV_DO_TOKEN (credential_source: env for digitalocean)` (HTTP 400 over `--remote`, the streaming apply/destroy ending with the `error` event; `config.CheckTokenCredentialEnv`, the one definition `validate secrets` lists from). It is mapped to `DIGITALOCEAN_TOKEN` for Terraform/OpenTofu and Pulumi. The generated `provider "digitalocean" {}` carries no token, but the Terraform/OpenTofu `iac init` runs the same rule before writing it (`failed to create provider configuration: ` and the message above, HTTP 400 over `--remote`).
 
 ### cloudProvider.cloudflare
 
@@ -819,7 +830,7 @@ Used when `cloudProvider.type` is `cloudflare`.
 |-------|------|----------|---------|-------------|
 | `credential_source` | string | No | `env` | Only `env` is accepted; `ambient` is rejected (no workload identity). See [Credential source](#credential-source) |
 
-**Environment variables.** `{INFRAENV}_CLOUDFLARE_API_TOKEN` (required by `validate secrets`) is mapped to `CLOUDFLARE_API_TOKEN` for Terraform/OpenTofu and Pulumi. The generated `provider "cloudflare" {}` carries no token.
+**Environment variables.** `{INFRAENV}_CLOUDFLARE_API_TOKEN` is required before any tool runs: `iac init`, `plan`, `apply` and `destroy` fail in infrapipe, for every engine,, before terraform, tofu or pulumi starts, with `missing required environment variable: DEV_CLOUDFLARE_API_TOKEN (credential_source: env for cloudflare)` (HTTP 400 over `--remote`, the streaming apply/destroy ending with the `error` event; `config.CheckTokenCredentialEnv`, the one definition `validate secrets` lists from). It is mapped to `CLOUDFLARE_API_TOKEN` for Terraform/OpenTofu and Pulumi. The generated `provider "cloudflare" {}` carries no token, but the Terraform/OpenTofu `iac init` runs the same rule before writing it (`failed to create provider configuration: ` and the message above, HTTP 400 over `--remote`).
 
 ---
 

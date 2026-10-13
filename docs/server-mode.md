@@ -13,10 +13,10 @@ Infrapipe can run as a long-lived HTTP/JSON server, exposing all IaC and validat
 ### Insecure (local development)
 
 ```bash
-infrapipe serve --addr :8080 --insecure
+infrapipe serve --addr :8080 --auth-mode none --insecure
 ```
 
-No TLS, no authentication. Suitable for local development only.
+No TLS, no authentication, stated twice: `--insecure` alone is refused, because the default auth mode is mTLS, which needs TLS (see [Startup Postures](#startup-postures-fail-closed)). Suitable for local development only.
 
 ### mTLS (production default)
 
@@ -348,6 +348,8 @@ The server refuses to start with any flag combination that cannot deliver the pr
 | Local development | `--auth-mode none --insecure` | unauthenticated + unencrypted; banner says so |
 
 Refused combinations (server exits with an actionable error): `mtls` without `--tls-ca`; `mtls` with `--insecure`; `--insecure` without an explicit `--auth-mode`; `apikey`/`none` with neither TLS material nor `--insecure`.
+
+Stopping a running server with SIGTERM or SIGINT (Ctrl-C) is a clean exit: the server finishes the requests in flight, flushes telemetry (with OpenTelemetry enabled, bounded by 5 seconds when the collector is unreachable), then exits 0 with no error and no usage text. A startup failure such as a bound port or unreadable TLS material prints the `Error:` line alone; only a flag error prints the usage block.
 
 ## Code Directory Confinement
 

@@ -141,7 +141,9 @@ Generate a config interactively, or create one manually:
 infrapipe init config
 ```
 
-Or create a `.infrapipe.yaml` manually in your project root:
+Without `--output`, the wizard saves `.infrapipe.yaml` at the git checkout root (the current directory outside a checkout), wherever in the checkout you run it, so every command finds it.
+
+Or create a `.infrapipe.yaml` manually in your project root (the git checkout root):
 
 ```yaml
 # Required -- choose your IaC engine
@@ -413,6 +415,8 @@ See [docs/multi-stage.md](docs/multi-stage.md) for full documentation.
 ## Configuration
 
 Infrapipe is configured through a single `.infrapipe.yaml` file placed in your project root. The configuration defines your IaC engine, cloud provider, CI/CD context, secrets management, source control, deployment mappings, and provider version constraints.
+
+Every command finds it the same way: `--config <path>` when given (a missing or unreadable file fails every command, `serve` included, never a fallback; `validate config` reports an unreadable one in its own check table), else `.infrapipe.yaml` in the git checkout root (the current directory outside a checkout), else `$HOME/.infrapipe.yaml`. One file is used, never a merge; a command that needs a config and finds none fails naming every path searched, and one whose file cannot be read (malformed YAML, unreadable, a `--config` without a `.yaml` extension) fails naming the file.
 
 For the full schema reference with all fields, defaults, and valid values, see [docs/configuration-reference.md](docs/configuration-reference.md).
 
