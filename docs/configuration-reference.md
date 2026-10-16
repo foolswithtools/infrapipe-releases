@@ -28,6 +28,7 @@ llm:                 # Optional -- LLM integration settings
 - an exec role that is not literal or carries a secret: a `${…}` placeholder in `cloudProvider.aws.exec_role_arn` or any `exec_role` field, an Azure `exec_role.client_secret`, or a GCP `exec_role.impersonate_service_account` that is not a service-account e-mail;
 - an unknown `cloudProvider.azurerm.ambient_method` or `cloudProvider.oci.ambient_principal`;
 - an AWS alias with no `assume_role_arn`;
+- an AWS `default_tags` entry that is not a `{key, value}` pair, has an empty key or value, a key over 128 or value over 256 characters, a control character, a repeated key or a key with the reserved `aws:` prefix (named in the message);
 - an `additionalProviders` entry with no `source`.
 
 **Multi-stage workflows:** Use `--output-vars` on `iac apply` to capture outputs, and `--input-vars` on `iac plan`, `iac apply`, or `iac destroy` to inject variables from earlier stages. See [docs/multi-stage.md](multi-stage.md) for details.
@@ -54,12 +55,13 @@ Used when `IaC.type` is `terraform`.
 | `backend` | string | No | `local` | State backend: `s3`, `azurerm`, `gcs`, `oci` (Terraform ≥ 1.12 only) or `local`. `local` or unset keeps state on local disk (no backend file). Any other value fails `validate config` and `iac init` (HTTP 400 server-side) before anything is written |
 | `key` | string | For `azurerm` | -- (`oci`: `terraform.tfstate`) | State file key/path (s3, azurerm, oci); required by `azurerm`. Ignored by `gcs`, which always writes `prefix = "terraform/state"` |
 | `region` | string | No | -- | S3 backend region; read only by `s3` (the `oci` backend takes `cloudProvider.oci.region` or `{INFRAENV}_OCI_REGION`) |
+| `use_lockfile` | bool | No | `false` | S3 native state locking: renders `use_lockfile = true` into `backend-s3.tf`, so the state is locked with S3 conditional writes and no DynamoDB table. Read only by `s3`. Needs Terraform ≥ 1.11 (OpenTofu ≥ 1.10): a pinned `version` below that fails `iac init`, `validate config` and `validate backend` with one message; an unset `version` warns. Without it the generated backend has **no** lock and the `-lock=true` flag infrapipe passes locks nothing, so two runs on one workspace can both write the state. |
 | `resource_group_name` | string | For `azurerm` with `credential_source: env` | -- | Azure backend resource group. Required with `cloudProvider.azurerm.credential_source: env`, where the backend lists the storage account key in it; optional in `ambient` mode (`use_azuread_auth`) |
 | `container_name` | string | For `azurerm` | -- | Azure backend blob container; required by `azurerm` |
 
 #### State backend variables
 
-Each backend reads its own `{INFRAENV}_*` variables, whatever `cloudProvider.type` and `credential_source` are. `validate secrets` (and `POST /api/v1/validate`) requires exactly these for the configured `IaC.<terraform|tofu>.backend`, and `init config` lists them. `init config` never asks for the bucket or storage account; after the backend choice it asks only for the `IaC.<tool>` fields that backend reads: `s3` region and key, `azurerm` resource group, container and key, `oci` key, `gcs` nothing:
+Each backend reads its own `{INFRAENV}_*` variables, whatever `cloudProvider.type` and `credential_source` are. `validate secrets` (and `POST /api/v1/validate`) requires exactly these for the configured `IaC.<terraform|tofu>.backend`, and `init config` lists them. `init config` never asks for the bucket or storage account; after the backend choice it asks only for the `IaC.<tool>` fields that backend reads: `s3` region, key and whether to enable [`use_lockfile`](#iacterraform) (S3 native state locking: `Enable S3 native state locking (use_lockfile; Terraform >= 1.11, OpenTofu >= 1.10)?`, default yes for OpenTofu and no for Terraform, since the wizard pins no IaC version and Terraform below 1.11 rejects the argument), `azurerm` resource group, container and key, `oci` key, `gcs` nothing:
 
 | `backend` | Required variables |
 |-----------|--------------------|
@@ -75,7 +77,7 @@ Only `IaC.terraform.backend` and `IaC.tofu.backend` take these names. CloudForma
 
 **Azure backend note**: with `backend: azurerm`, `container_name` and `key` are required in both `credential_source` modes, and `resource_group_name` is required when `cloudProvider.azurerm.credential_source` is `env` (the account-key lookup is scoped to it) but optional in `ambient` mode, where the backend authenticates with Entra ID (`use_azuread_auth`). The azurerm backend reads `cloudProvider.azurerm.credential_source` whatever `cloudProvider.type` is. A missing field fails `iac init` (HTTP 400 server-side) naming the key, e.g. `the azurerm state backend needs IaC.terraform.container_name (the blob container that holds the state)`, before `backend-azurerm.tf` is written, `validate config` fails the same configs with the same message in its `State backend fields` row, and `validate backend` fails them with the same message before running any `az` command (one shared rule). In earlier releases the generator rendered `container_name = ""` and the failure surfaced only at `terraform init`.
 
-**S3 backend note:** When `backend` is `s3`, the generated `backend-s3.tf` uses the assignment `assume_role = { role_arn = "..." }` instead of the deprecated top-level `role_arn` attribute (deprecated in Terraform 1.6+); OpenTofu 1.9 requires the `=`. The `assume_role` assignment is included only when `{INFRAENV}_AWS_ASSUME_ROLE_ARN` is set and `cloudProvider.aws.auth_mode` is not `environment` (credentials are then already in the environment, and assuming the role again could fail); otherwise it is omitted entirely.
+**S3 backend note:** When `backend` is `s3`, `use_lockfile: true` adds `use_lockfile = true` to the block (see the field above; `validate backend` prints `locking: use_lockfile (S3 native locking)` or `locking: none …`, and `validate config` a `State backend locking` row). The generated `backend-s3.tf` uses the assignment `assume_role = { role_arn = "..." }` instead of the deprecated top-level `role_arn` attribute (deprecated in Terraform 1.6+); OpenTofu 1.9 requires the `=`. The `assume_role` assignment is included only when `{INFRAENV}_AWS_ASSUME_ROLE_ARN` is set and `cloudProvider.aws.auth_mode` is not `environment` (credentials are then already in the environment, and assuming the role again could fail); otherwise it is omitted entirely.
 
 **OCI backend note**: `backend: oci` generates `backend-oci.tf` for Terraform's native `oci` backend, which needs **Terraform ≥ 1.12**. A `version` below 1.12 fails `iac init`; an unset `version` logs a warning. OpenTofu has no `oci` backend (opentofu/opentofu#1011), so `IaC.tofu.backend: oci` fails `validate config` and `iac init` (HTTP 400 server-side) before anything is written. The bucket comes from `{INFRAENV}_OCI_TFSTATE_BUCKET` and the namespace from `{INFRAENV}_OCI_TFSTATE_NAMESPACE` (both required, not secret, and checked by `validate secrets` for any cloud, with the region and identity below); `key` defaults to `terraform.tfstate`; the region is `cloudProvider.oci.region`, else `{INFRAENV}_OCI_REGION`, in both `credential_source` modes (required for every principal; the env-mode *provider* differs and reads only `{INFRAENV}_OCI_REGION`, see [cloudProvider.oci](#cloudprovideroci)). The file never carries key material:
 
@@ -107,6 +109,7 @@ Used when `IaC.type` is `tofu`. Same fields as `IaC.terraform` (including the S3
 | `backend` | string | No | `local` | State backend: `s3`, `azurerm`, `gcs` or `local` (OpenTofu has no `oci` backend, so `oci` fails `validate config` and `iac init` too). `local` or unset keeps state on local disk (no backend file). Any other value fails `validate config` and `iac init` (HTTP 400 server-side) before anything is written |
 | `key` | string | For `azurerm` | -- | State file key/path (s3, azurerm); required by `azurerm`. Ignored by `gcs`, which always writes `prefix = "terraform/state"` |
 | `region` | string | No | -- | S3 backend region; read only by `s3` (the `oci` backend takes `cloudProvider.oci.region` or `{INFRAENV}_OCI_REGION`) |
+| `use_lockfile` | bool | No | `false` | S3 native state locking: renders `use_lockfile = true` into `backend-s3.tf`, so the state is locked with S3 conditional writes and no DynamoDB table. Read only by `s3`. Needs Terraform ≥ 1.11 (OpenTofu ≥ 1.10): a pinned `version` below that fails `iac init`, `validate config` and `validate backend` with one message; an unset `version` warns. Without it the generated backend has **no** lock and the `-lock=true` flag infrapipe passes locks nothing, so two runs on one workspace can both write the state. |
 | `resource_group_name` | string | For `azurerm` with `credential_source: env` | -- | Azure backend resource group. Required with `cloudProvider.azurerm.credential_source: env`, where the backend lists the storage account key in it; optional in `ambient` mode (`use_azuread_auth`) |
 | `container_name` | string | For `azurerm` | -- | Azure backend blob container; required by `azurerm` |
 
@@ -271,6 +274,7 @@ Used when `cloudProvider.type` is `aws`.
 | `exec_role_arn` | string | No | -- | Narrow-scope role ARN for subprocess exec blocks (STS AssumeRole) |
 | `exec_session_name` | string | No | `infrapipe-exec` | Session name for exec role STS AssumeRole call |
 | `aliases` | map | No | -- | Cross-account provider aliases (see below) |
+| `default_tags` | list of `{key, value}` | No | -- | Tags rendered as `default_tags` into every generated `provider "aws"` block, the primary and each alias (see [Default tags](#default-tags)); Terraform/OpenTofu only |
 | `credential_source` | string | No | `ambient` | `ambient` (workload identity) or `env` (`{INFRAENV}_*` variables). See [Credential source](#credential-source) |
 
 **Example:**
@@ -305,6 +309,38 @@ cloudProvider:
 - In both modes the provider's `assume_role` block is emitted only when `{INFRAENV}_AWS_ASSUME_ROLE_ARN` is set and `auth_mode` is not `environment`.
 
 **Note:** The exec role is assumed via `aws sts assume-role` using the base credentials: `{INFRAENV}_AWS_ACCESS_KEY` in `env` mode, the workload identity in `ambient` mode. The exec role's IAM trust policy must allow the base IAM user or account root to assume it.
+
+#### Default tags
+
+`default_tags` sets tags the aws provider adds to every taggable resource. `iac init` renders them into the primary `provider "aws"` block and each alias block, keys sorted; with no entries the generated file is unchanged:
+
+```yaml
+cloudProvider:
+  type: aws
+  aws:
+    region: us-east-1
+    default_tags:
+      - key: CostCenter
+        value: Platform
+      - key: team
+        value: infra
+```
+
+```hcl
+provider "aws" {
+  region = "us-east-1"
+  default_tags {
+    tags = {
+      "CostCenter" = "Platform"
+      "team"       = "infra"
+    }
+  }
+}
+```
+
+It is a list of `{key, value}` entries, not a map: the config loader lowercases map keys, and AWS tag keys are case-sensitive, so a map is refused (`must be a list of {key, value} entries`). Values are literal: `${…}` and `%{…}` are written escaped, so Terraform never interpolates them, and an `{INFRAENV}_` variable is not expanded (the file is generated once at `iac init` and some users commit it). `validate config` and `iac init` apply the same rules: key and value non-empty, a key of at most 128 characters, a value of at most 256, no control characters, no key twice, and no key starting with the reserved `aws:` prefix (any case). CloudFormation and Pulumi do not read `default_tags`.
+
+**Your root module must not declare `provider "aws"` or `required_providers`.** `iac init` writes the only `provider "aws"` block and the only `terraform { required_providers { … } }` block of the root (`provider-aws.tf`); a second one fails `plan` with `Duplicate provider configuration` or `Duplicate required providers configuration`. Set provider options through `.infrapipe.yaml` (`region`, `aliases`, `default_tags`), declare other providers under [additionalProviders](#additionalproviders), and write the root for the aws provider version infrapipe pins ([providerVersions](#providerversions) `aws`, default `~> 5.0`).
 
 #### Operating with workload identity
 
@@ -917,11 +953,11 @@ Maps git branches to deployment environments. This is the core of infrapipe's op
 
 When you run `infrapipe iac plan` on the `develop` branch:
 1. Infrapipe detects the current branch (`develop`)
-2. Looks up `applications.deployment.develop` in the config
+2. Selects the deployment entry by one rule (`config.ResolveDeploymentKey`, shared by `iac init`, `plan`/`apply`/`destroy`, the server and `validate config`): the entry whose `branch:` is `develop` wins; else the entry whose **key** is `develop`; else `default`. The key is a label: `dev:` with `branch: develop` routes `develop` to `dev`, and a branch Viper cannot carry as a key (it lower-cases keys and treats `.` as a path separator, so `Release/1.2` or `Feature-X`) still gets its own entry through `branch:`. The `default` entry's own `branch:` is a fallback marker, never a claim (a `default:` keyed entry with `branch: main` beside a `main:` entry is fine)
 3. Reads `infraenv: DEV` → uses the `DEV_*` variables: identifiers such as `DEV_AWS_TFSTATE_S3_BUCKET`, `DEV_AWS_ASSUME_ROLE_ARN` and `DEV_AZ_CLIENT_ID`, plus, with `credential_source: env`, static credentials such as `DEV_AWS_ACCESS_KEY` or `DEV_AZ_CLIENT_SECRET`
 4. Reads `codedir: infra` → runs IaC commands in the `infra` directory of the checkout
 
-If the branch isn't found, infrapipe falls back to the `default` deployment entry.
+If no entry matches by `branch:` or by key, infrapipe falls back to the `default` deployment entry. Two entries that would both match one branch (two equal `branch:` values, or a `branch:` that is another entry's key) fail `validate config` and every command with `applications.deployment: branch "develop" is mapped by both "dev" (branch:) and "develop" (key); …`. `validate config`'s `Branch mapped to deployment` row names the selected entry and how it matched: `(develop → dev, by branch:)`, `(develop → develop, by key)` or `(feature/x → default)`.
 
 At least one deployment entry is required.
 
@@ -931,7 +967,7 @@ Each entry under `deployment` is a named deployment mapping.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `branch` | string | No | -- | Git branch name |
+| `branch` | string | No | -- | Git branch this entry serves; wins over the key when both could match. Unset means the entry is selected by its key alone |
 | `infraenv` | string | No | -- | Infrastructure environment label |
 | `appenv` | string | No | -- | Application environment label |
 | `postfix` | string | No | -- | Resource name postfix |

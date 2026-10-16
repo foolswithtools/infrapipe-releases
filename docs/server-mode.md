@@ -136,10 +136,14 @@ Preview infrastructure changes.
 ```json
 {
   "success": true,
-  "planOutput": "Plan accepted for workspace dev-us-east-1",
+  "planOutput": "Plan completed for workspace dev-us-east-1",
+  "planText": "  # terraform_data.probe will be created\n  …\n\nPlan: 1 to add, 0 to change, 0 to destroy.\n",
+  "planSummary": "Plan: 1 to add, 0 to change, 0 to destroy.",
   "llmExplanation": ""
 }
 ```
+
+`planText` is the engine's plan, redacted of the environment's credential values exactly like the LLM payload: Terraform/OpenTofu's `show -no-color` of the saved plan, CloudFormation's change set (one line per change), Bicep/ARM's what-if or Pulumi's preview. `planSummary` is its summary line: `Plan: …` or `No changes.`, `Change set: …`, `Resource changes: …`, `Resources: …`. With `"showPlanJSON": true` in the request the response also carries `planJSON`: Terraform/OpenTofu's `show -json` or CloudFormation's change set description; Bicep, ARM and Pulumi answer 400 before anything runs. The client prints `planText` and `planSummary` as the local `iac plan` does (`--no-show-plan` drops the text) and writes `planJSON` to `--plan-json <path>` (0600).
 
 ### POST /api/v1/iac/apply
 
@@ -391,7 +395,7 @@ The server serves concurrent clients safely:
 - **Why per-code-directory:** the IaC tool's active-workspace selection is on-disk state *of the code directory*, so even operations on different workspaces of the same directory conflict.
 - **Delegated credentials never touch the server's process environment.** Exec-role credentials resolved for an operation travel only in that operation's context and appear only in the environment of *its own* subprocesses. Concurrent operations against different environments are fully isolated (race-detector-verified), and nothing lingers after an operation completes.
 - **Request behavior is fixed at request start:** all configuration (context resolution, backend, LLM settings) is snapshotted once per request; changing configuration mid-flight never affects in-flight operations.
-- **Cross-process caveat:** serialization is per server process. Running multiple server processes against the same checkout is not coordinated by infrapipe — the IaC tool's remote-state locking is the only guard there.
+- **Cross-process caveat:** serialization is per server process. Running multiple server processes against the same checkout is not coordinated by infrapipe — the IaC tool's remote-state locking is the only guard there, and for the `s3` backend that lock exists only with `IaC.<tool>.use_lockfile: true`; without it two processes can both write one state object.
 - **Cancellation:** a queued request whose client disconnects acquires its turn briefly and exits immediately via its cancelled request context.
 
 ## Security Considerations

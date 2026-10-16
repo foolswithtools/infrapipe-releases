@@ -23,6 +23,14 @@ infrapipe iac apply --config .infrapipe-k8s.yaml --input-vars /tmp/aws-outputs.j
 Stage 2's code declares a `variable` block for each key it uses, for
 example `variable "vpc_id" { type = string }`.
 
+Two Terraform or OpenTofu stages may share one code directory with
+different state backends (two config files that differ in the S3 `key`,
+say). `iac init --config <stage>` rewrites the backend file, and the
+stage's next `plan`, `apply` or `destroy` initializes the engine with
+`-reconfigure`, so the rewritten backend replaces the one the engine
+recorded in its `.terraform` directory and no state migrates between the stages. No
+manual cleanup of `.terraform/terraform.tfstate` is needed.
+
 ## How It Works
 
 ### Output Capture (--output-vars)

@@ -198,9 +198,20 @@ infrapipe validate config     # Check config file is valid
 infrapipe validate secrets    # Check credentials are set
 infrapipe validate backend    # Check state backend is accessible
 infrapipe iac init            # Generate provider/backend config (Pulumi: pulumi login)
-infrapipe iac plan            # Preview infrastructure changes
+infrapipe iac plan            # Preview infrastructure changes: prints the plan diff and "Plan: N to add, …"
+infrapipe iac plan --no-show-plan            # summary line only
+infrapipe iac plan --plan-json /tmp/plan.json   # also write the engine's plan JSON, 0600 (Terraform/OpenTofu, CloudFormation)
 infrapipe iac apply           # Apply infrastructure changes
 ```
+
+What `iac plan` prints, per engine (locally and with `--remote`; redacted of the environment's credential values; `--no-show-plan` keeps only the summary):
+
+| Engine | Diff | Summary line | `--plan-json` |
+|---|---|---|---|
+| Terraform, OpenTofu | `show -no-color` of the saved plan | `Plan: N to add, …` / `No changes. …` | `show -json` |
+| CloudFormation | one line per change of the change set (`Add  AWS::SSM::Parameter  Probe`) | `Change set: N to add, …` / `No changes.` | the change set description (`describe-change-set`) |
+| Bicep, ARM | the `az deployment group what-if` text | `Resource changes: …` | refused before anything runs |
+| Pulumi | the `pulumi preview --diff` text | `Resources: + N to create, …` | refused before anything runs |
 
 ### LLM Integration (Optional)
 
